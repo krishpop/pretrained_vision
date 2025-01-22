@@ -93,7 +93,7 @@ def convert_pytorch_to_jax(pytorch_statedict, jax_variables, resnet_type="50"):
 
   jax_params = flatten_dict(unfreeze(jax_variables))
   # create a new dict the same shape as the original jax params dict but filled with the (transposed) pytorch weights
-  jax2pytorch = {translate_key(key, resnet_type): key for key in pytorch_statedict.keys() if translate_key(key) is not None}
+  jax2pytorch = {translate_key(key, resnet_type): key for key in pytorch_statedict.keys() if translate_key(key, resnet_type) is not None}
   pytorch_params = {k: v.numpy().T if len(v.shape) != 4 else v.numpy().transpose((2, 3, 1, 0))
                     for k, v in pytorch_statedict.items()}
   new_jax_params = freeze(unflatten_dict({key: pytorch_params[jax2pytorch[key]] for key in jax_params.keys()}))
@@ -125,15 +125,18 @@ def load_vip_statedict(pretrained_path):
     vip_statedict = {k.split('module.convnet.')[1]: v for k, v in vip_model.state_dict().items() if 'module.convnet' in k}
     return vip_statedict
 
-def load_imagenet_statedict(pretrained_path):
+def load_imagenet_statedict(pretrained_path, encoder):
     import torch
     torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
     import torchvision
 
-    torch_res50 = torchvision.models.resnet50(pretrained=True)
-    torch_res50.fc = torch.nn.Identity()
-    torch_res50.eval()
-    return torch_res50.state_dict()
+    if encoder == 'resnetv1-50':
+        model = torchvision.models.resnet50(pretrained=True)
+    elif encoder == "resnetv1-18":
+        model = torchvision.models.resnet18(pretrained=True)
+    model.fc = torch.nn.Identity()
+    model.eval()
+    return model.state_dict()
 
 def load_statedict_from_file(pretrained_path):
   import torch
@@ -154,9 +157,9 @@ def main(_):
     elif 'vip' in FLAGS.pretrained_path:
         pytorch_statedict = load_vip_statedict(FLAGS.pretrained_path)
     elif 'imagenet' in FLAGS.pretrained_path:
-        pytorch_statedict = load_imagenet_statedict(FLAGS.pretrained_path)
+        pytorch_statedict = load_imagenet_statedict(FLAGS.pretrained_path, FLAGS.encoder)
     
-    new_params_and_ev = convert_pytorch_to_jax(pytorch_statedict, init_params_and_ev)
+    new_params_and_ev = convert_pytorch_to_jax(pytorch_statedict, init_params_and_ev, FLAGS.encoder.split('-')[1])
     restored_ev, restored_params = new_params_and_ev.pop('params')
         
     train_state = TrainState.create(
